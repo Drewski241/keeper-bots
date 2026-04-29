@@ -537,11 +537,11 @@ async def run_liquidation_bid_bot():
 
     if args.environment == "sandbox":
         trade_env = TradeEnv.SANDBOX
-        crypto_com_websocket_url = "wss://uat-stream.3ona.co/v2/user"
+        crypto_com_websocket_url = "wss://uat-stream.3ona.co/exchange/v1/user"
         print(f"Crypto.com sandbox environment")
     elif args.environment == "live":
         trade_env = TradeEnv.LIVE
-        crypto_com_websocket_url = "wss://stream.crypto.com/v2/user"
+        crypto_com_websocket_url = "wss://stream.crypto.com/exchange/v1/user"
 
     log.info("Running liquidation bid bot in %s environment", trade_env.name)
 
