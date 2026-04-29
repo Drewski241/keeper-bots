@@ -31,8 +31,8 @@ HEARTBEAT_INTERVAL = 86400  # seconds; keep Crypto.com API key active
 
 
 class TradeEnv(Enum):
-    LIVE = "live"
     SANDBOX = "sandbox"
+    LIVE = "live"
 
 
 class BidFail(Enum):
@@ -94,7 +94,7 @@ rpc_client = CircuitRPCClient(rpc_url, private_key, add_sig_data, fee_per_cost)
 
 def get_crypto_com_symbols(base_symbol, quote_symbol):
     """Return Crypto.com symbols for market and price"""
-    return f"{base_symbol}_{quote_symbol}", f"{base_symbol}/{quote_symbol}"
+    return f"{base_symbol}_{quote_symbol}", f"{base_symbol}-{quote_symbol}"
 
 
 async def liquidate_vault(
@@ -187,9 +187,11 @@ async def liquidate_vault(
         stablecoin_symbol,
     )
 
-    # get Crypto.com XCH balance
+    # get Crypto.com collateral balance
     try:
-        response = await accountAPI.get_account_balance(currency=collateral_symbol)
+        response = await accountAPI.get_account_balance(
+            currency=collateral_symbol,
+        )
     except Exception as err:
         # keep trying in case of error as we need to close our position
         log.error(
@@ -207,7 +209,7 @@ async def liquidate_vault(
 
     try:
         available_xch_balance = float(
-            response["data"][0]["details"][0].get("cashBal", 0)
+            response["data"][0]["details"][0]["available"]
         )  # in XCH
     except Exception:
         raise ValueError(
@@ -278,7 +280,7 @@ async def liquidate_vault(
 
     collateral_to_sell = min(
         collateral_to_receive, available_xch_balance
-    )  # TODO: take into account Crypto.com fees
+    )  # TODO: take into account Crypto.com fees # including available_xch_balance again here due to potential rounding errors in bid_amount calculation
 
     hedge_price, _, hedge_volume = crypto_com_order_book.price(
         "sell", collateral_to_sell, True
@@ -368,10 +370,15 @@ async def liquidate_vault(
             await asyncio.sleep(retry_delay)
             continue
 
+        if response.get("code") != "0":
+            error_msg = response.get("msg", "Unknown error")
+            # irrecoverable error
+            raise OrderRejectedError(
+                f"[{vname}] Failed to place order: {error_msg}"
+            )
+
         try:
             ordId = response.get("order_id")
-            if not ordId:
-                raise ValueError("No order_id in response")
         except Exception:
             log.error(
                 "[%s] Failed to get ordId. Unrecognized response format: %s",
@@ -406,7 +413,9 @@ async def liquidate_vault(
             ordId,
         )
         try:
-            response = await tradeAPI.get_order(instrument_id=market_symbol, order_id=ordId)
+            response = await tradeAPI.get_order(
+                instrument_id=market_symbol, order_id=ordId
+            )
         except Exception as err:
             # keep trying in case of error as we need to close our position
             log.error(
@@ -419,12 +428,23 @@ async def liquidate_vault(
             await asyncio.sleep(retry_delay)
             continue
 
+        if response.get("code") != "0":
+            # failed to get order
+            log.error(
+                "[%s] Failed to get info for ordId %s. Response: %s",
+                vname,
+                ordId,
+                json.dumps(response),
+            )
+            await asyncio.sleep(retry_delay)
+            continue
+
         try:
-            state = response.get("status", "").upper()
+            state = response.get("state")
             total_fill_volume = float(response.get("filled_quantity", 0))
             avg_fill_price = float(response.get("avg_price", 0))
-            crypto_com_fee = float(response.get("fee", 0))
-            fee_ccy = response.get("fee_currency", proxy_symbol)
+            okx_fee = float(response.get("fee", 0))  # fee in quote currency
+            fee_ccy = proxy_symbol  # Crypto.com fees in quote currency
         except Exception:
             log.error(
                 "[%s] Failed to get order info. Unrecognized response format: %s",
@@ -433,7 +453,7 @@ async def liquidate_vault(
             )
             return BidFail.NOT_RECONCILED
 
-        if state != "FILLED":
+        if state != "filled":
             log.warning("[%s] Order was not filled. State: %s", vname, state)
         else:
             log.info(
@@ -443,17 +463,10 @@ async def liquidate_vault(
                 collateral_symbol,
                 avg_fill_price,
                 price_symbol,
-                crypto_com_fee,
+                okx_fee,
                 fee_ccy,
             )
-        if not fee_ccy == proxy_symbol:
-            log.warning(
-                "[%s] Trading fees were charged in %s, expected %s",
-                vname,
-                fee_ccy,
-                proxy_symbol,
-            )
-        if not abs(total_fill_volume - hedge_volume) < 10 ** (-base_decimals):
+        if abs(total_fill_volume - hedge_volume) < 10 ** (-base_decimals):
             log.warning(
                 "[%s] Filled volume does not match hedge volume (%s != %s)",
                 vname,
@@ -462,11 +475,11 @@ async def liquidate_vault(
             )
 
         quote_delta = (
-            total_fill_volume * avg_fill_price - crypto_com_fee - bid_amount / MCAT
-        )
+            total_fill_volume * avg_fill_price - okx_fee - bid_amount / MCAT
+        )  # LATER: add melt mojos (if any)
         base_delta = (
             collateral_to_receive - total_fill_volume
-        )
+        )  # LATER: deduct on-chain tx fee
         price = crypto_com_order_book.mid_price()
         if price is None:
             log.error(
@@ -496,7 +509,9 @@ async def run_liquidation_bid_bot():
     parser = argparse.ArgumentParser(
         description="Liquidation bid bot for Circuit protocol"
     )
-    parser.add_argument("-e", "--environment", choices=["sandbox", "live"], default="sandbox")
+    parser.add_argument(
+        "-e", "--environment", choices=["sandbox", "live"], default="sandbox"
+    )
     parser.add_argument("-k", "--private-key-prefix", default="")
     parser.add_argument(
         "-v",
@@ -522,16 +537,15 @@ async def run_liquidation_bid_bot():
 
     if args.environment == "sandbox":
         trade_env = TradeEnv.SANDBOX
-        collateral_symbol = "XRP"
         crypto_com_websocket_url = "wss://uat-stream.3ona.co/v2/user"
-        print(f"Crypto.com sandbox environment. Using {collateral_symbol} as collateral asset")
+        print(f"Crypto.com sandbox environment")
     elif args.environment == "live":
         trade_env = TradeEnv.LIVE
-        collateral_symbol = "XCH"
         crypto_com_websocket_url = "wss://stream.crypto.com/v2/user"
 
     log.info("Running liquidation bid bot in %s environment", trade_env.name)
 
+    collateral_symbol = "XCH"  # CircuitDAO collateral asset
     stablecoin_symbol = "BYC"  # Circuit stablecoin (BYC)
 
     # BYC proxy asset to be used for hedging
@@ -571,14 +585,14 @@ async def run_liquidation_bid_bot():
             "Must provide key and secret to connect to Crypto.com trade API"
         )
     tradeAPI = CryptoComTradeAPI(
-        key, secret, sandbox=(args.environment == "sandbox")
+        key, secret, sandbox=(trade_env == TradeEnv.SANDBOX)
     )
     accountAPI = CryptoComAccountAPI(
-        key, secret, sandbox=(args.environment == "sandbox")
+        key, secret, sandbox=(trade_env == TradeEnv.SANDBOX)
     )
 
-    base_decimals = 4
-    price_decimals = 4
+    base_decimals = 4  # LATER: can we get this from Crypto.com API in case it ever changes?
+    price_decimals = 4  # LATER: can we get this from Crypto.com API in case it ever changes?
 
     # Fire immediately on first loop to verify key is valid at startup
     last_crypto_com_heartbeat = time.monotonic() - HEARTBEAT_INTERVAL
@@ -592,13 +606,19 @@ async def run_liquidation_bid_bot():
                     await accountAPI.get_account_balance()
                     log.info("Crypto.com API heartbeat: balance query successful")
                 except Exception as err:
-                    log.warning("Crypto.com API heartbeat failed. %s: %s", type(err).__name__, err)
+                    log.warning(
+                        "Crypto.com API heartbeat failed. %s: %s",
+                        type(err).__name__,
+                        err,
+                    )
                 last_crypto_com_heartbeat = time.monotonic()
 
             try:
                 state = await rpc_client.upkeep_state(vaults=True)
             except Exception as err:
-                log.error("Failed to get state of vaults. %s: %s", type(err).__name__, err)
+                log.error(
+                    "Failed to get state of vaults. %s: %s", type(err).__name__, err
+                )
                 await asyncio.sleep(CONTINUE_DELAY)
                 continue
 
@@ -638,7 +658,7 @@ async def run_liquidation_bid_bot():
                 continue
 
             # Check how much debt there is. Then borrow an appropriate amount of BYC
-            price = crypto_com_order_book.mid_price()
+            price = crypto_com_order_book.mid_price()  # conservative estimate of market price
             if price is None:
                 log.error(
                     "Order book mid price unavailable. Sleeping for %s seconds",
@@ -668,9 +688,14 @@ async def run_liquidation_bid_bot():
 
             debt = sum(debts)
 
+            # TODO: split wallet BYC balance into coins large enough for each auction.
+            #  then bid with those specific coins.
+
             if available_byc_amount < debt:
-                min_debt = 100 * MCAT
-                liquidation_ratio_pct = 170
+                # TODO: take Crypto.com collateral balance into account when deciding how much byc to borrow ? See liq task
+                # get min debt amount from Statutes
+                min_debt = 100 * MCAT  # fall back amount
+                liquidation_ratio_pct = 170  # fall back amount
                 try:
                     statutes = await rpc_client.statutes_list()
                 except Exception as err:
@@ -700,25 +725,25 @@ async def run_liquidation_bid_bot():
                     / 100
                 )
 
-                borrow_amount = max(min_debt, debt - available_byc_amount)
+                borrow_amount = max(min_debt, debt - available_byc_amount)  # in mBYC
                 deposit_amount = int(
                     min(
                         max(
                             available_xch_amount - MOJOS_PER_XCH,
                             0,
-                        ),
+                        ),  # keep 1 XCH for fees. TODO: better heuristic
                         MOJOS_PER_XCH
                         * (borrow_amount / MCAT)
                         * collateralization_ratio
                         / price,
                     )
-                )
+                )  # in mojos
                 borrow_amount = int(
                     MCAT
                     * (deposit_amount / MOJOS_PER_XCH)
                     * price
                     / collateralization_ratio
-                )
+                )  # in mBYC
 
                 if deposit_amount > 0:
                     log.info(
@@ -729,6 +754,8 @@ async def run_liquidation_bid_bot():
                         available_byc_amount / MCAT,
                     )
 
+                    # borrow enough BYC to liquidate all vaults
+                    # if borrowing fails, too bad, we proceed to liquidate with what BYC we have
                     try:
                         response = await rpc_client.vault_deposit(deposit_amount)
                     except Exception as err:
@@ -748,7 +775,9 @@ async def run_liquidation_bid_bot():
                                 response = await rpc_client.vault_borrow(borrow_amount)
                             except Exception as err:
                                 log.error(
-                                    "Failed to borrow BYC. %s: %s", type(err).__name__, err
+                                    "Failed to borrow BYC. %s: %s",
+                                    type(err).__name__,
+                                    err,
                                 )
                             if response.get("status") != "success":
                                 log.error(
