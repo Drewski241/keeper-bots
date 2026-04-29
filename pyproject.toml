@@ -19,8 +19,7 @@ circuit-cli = {git = "https://github.com/circuitdao/circuit-cli.git", branch = "
 #circuit-cli = {path = "../circuit-cli", develop = true}
 coinbase-advanced-py = "^1.8.2"
 python-json-logger = "^3.3.0"
-python-okx-async = {git = "https://github.com/circuitdao/python-okx-async.git", branch = "master"}
-#python-okx-async = {path = "../python-okx-async", develop = true}
+websockets = "^12.0"
 apscheduler = "^3.11.0"
 pytz = "^2025.2"
 sortedcontainers = "^2.4.0"
