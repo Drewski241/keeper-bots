@@ -564,10 +564,9 @@ async def run_liquidation_bid_bot():
         crypto_com_websocket_url,
         verbose=args.verbose,
         logger=log,
+    await crypto_com_order_book.connect()
+    await crypto_com_order_book.subscribe()
     )
-        await crypto_com_order_book.connect()
-        await crypto_com_order_book.subscribe()
-
     # Wait for order book to initialize
     max_wait = 30
     wait_interval = 0.5
