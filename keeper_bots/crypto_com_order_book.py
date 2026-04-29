@@ -59,7 +59,7 @@ class CryptoComOrderBook:
         self.ws = None
         self.verbose = verbose
         self.book = {}
-        self.url = url
+        self.url = "wss://stream.crypto.com/exchange/v1/market"
         self.initialized = False
         self._lock = asyncio.Lock()
         self.logger = logger or logging.getLogger(__name__)
