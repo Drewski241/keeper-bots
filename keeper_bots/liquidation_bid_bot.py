@@ -577,7 +577,17 @@ async def run_liquidation_bid_bot():
         waited += wait_interval
 
     if not crypto_com_order_book.initialized:
-        raise ValueError("Order book not initialized")
+        await crypto_com_order_book.connect()
+await crypto_com_order_book.subscribe()
+
+for i in range(20):
+    if crypto_com_order_book.initialized:
+        break
+    logger.info(f"Waiting for order book... attempt {i+1}")
+    await asyncio.sleep(0.5)
+
+if not crypto_com_order_book.initialized:
+    raise ValueError("Order book not initialized")
 
     # Instantiate trade API
     if not all([key, secret]):
