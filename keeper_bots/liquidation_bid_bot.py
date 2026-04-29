@@ -558,22 +558,25 @@ async def run_liquidation_bid_bot():
     uquote_symbol = "USD"  # ultimate quote currency
 
     # Subscribe to order book
-    crypto_com_order_book = CryptoComOrderBook(
-        market_symbol,
-        uquote_symbol,
-        crypto_com_websocket_url,
-        verbose=args.verbose,
-        logger=log,
-    await crypto_com_order_book.connect()
-    await crypto_com_order_book.subscribe()
-    )
-    # Wait for order book to initialize
-    max_wait = 30
-    wait_interval = 0.5
-    waited = 0
-    while not crypto_com_order_book.initialized and waited < max_wait:
-        await asyncio.sleep(wait_interval)
-        waited += wait_interval
+crypto_com_order_book = CryptoComOrderBook(
+    market_symbol,
+    uquote_symbol,
+    crypto_com_websocket_url,
+    verbose=args.verbose,
+    logger=log,
+)
+
+await crypto_com_order_book.connect()
+await crypto_com_order_book.subscribe()
+
+# Wait for order book to initialize
+max_wait = 30
+wait_interval = 0.5
+waited = 0
+
+while not crypto_com_order_book.initialized and waited < max_wait:
+    await asyncio.sleep(wait_interval)
+    waited += wait_interval
 
     if not crypto_com_order_book.initialized:
         await crypto_com_order_book.connect()
