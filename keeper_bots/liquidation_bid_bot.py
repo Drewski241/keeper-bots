@@ -537,11 +537,11 @@ async def run_liquidation_bid_bot():
 
     if args.environment == "sandbox":
         trade_env = TradeEnv.SANDBOX
-        crypto_com_websocket_url = "wss://uat-stream.3ona.co/exchange/v1/user"
+        crypto_com_websocket_url = "wss://uat-stream.3ona.co/exchange/v1/market"
         print(f"Crypto.com sandbox environment")
     elif args.environment == "live":
         trade_env = TradeEnv.LIVE
-        crypto_com_websocket_url = "wss://stream.crypto.com/exchange/v1/user"
+        crypto_com_websocket_url = "wss://stream.crypto.com/exchange/v1/market"
 
     log.info("Running liquidation bid bot in %s environment", trade_env.name)
 
@@ -558,44 +558,35 @@ async def run_liquidation_bid_bot():
     uquote_symbol = "USD"  # ultimate quote currency
 
     # Subscribe to order book
-crypto_com_order_book = CryptoComOrderBook(
-    market_symbol,
-    uquote_symbol,
-    crypto_com_websocket_url,
-    verbose=args.verbose,
-    logger=log,
-)
+    crypto_com_order_book = CryptoComOrderBook(
+        market_symbol,
+        uquote_symbol,
+        crypto_com_websocket_url,
+        verbose=args.verbose,
+        logger=log,
+    )
 
-await crypto_com_order_book.connect()
-await crypto_com_order_book.subscribe()
+    await crypto_com_order_book.connect()
+    await crypto_com_order_book.subscribe()
 
-# Wait for order book to initialize
-max_wait = 30
-wait_interval = 0.5
-waited = 0
+    # Wait for order book to initialize
+    max_wait = 30
+    wait_interval = 0.5
+    waited = 0
 
-while not crypto_com_order_book.initialized and waited < max_wait:
-    await asyncio.sleep(wait_interval)
-    waited += wait_interval
+    while not crypto_com_order_book.initialized and waited < max_wait:
+        await asyncio.sleep(wait_interval)
+        waited += wait_interval
+        log.info(f"Waiting for order book... {waited:.1f}s")
 
     if not crypto_com_order_book.initialized:
-        await crypto_com_order_book.connect()
-await crypto_com_order_book.subscribe()
-
-for i in range(20):
-    if crypto_com_order_book.initialized:
-        break
-    logger.info(f"Waiting for order book... attempt {i+1}")
-    await asyncio.sleep(0.5)
-
-if not crypto_com_order_book.initialized:
-    raise ValueError("Order book not initialized")
+        raise ValueError("Order book not initialized")
 
     # Instantiate trade API
     if not all([key, secret]):
         raise ValueError(
             "Must provide key and secret to connect to Crypto.com trade API"
-        )
+    )
     tradeAPI = CryptoComTradeAPI(
         key, secret, sandbox=(trade_env == TradeEnv.SANDBOX)
     )
