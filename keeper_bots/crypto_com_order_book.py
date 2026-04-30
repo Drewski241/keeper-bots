@@ -14,6 +14,7 @@ class CryptoComOrderBook:
     def __init__(self, sym, uquote, url, verbose=False, logger=None):
         self.sym = sym
         self.market_sym = sym.replace("_", "-")
+
         if len(self.sym.split("_")) != 2:
             raise ValueError("Symbol must be BASE_QUOTE format")
 
@@ -45,7 +46,9 @@ class CryptoComOrderBook:
             }
         }
 
+        self.logger.info(f"SYMBOL: {self.sym}")
         self.logger.info(f"Subscribing to: {channel}")
+
         await self.ws.send(json.dumps(msg))
 
     async def _listen(self):
@@ -62,16 +65,16 @@ class CryptoComOrderBook:
             self.logger.error(f"Bad JSON: {message}")
             return
 
-        # Debug logging (keep this)
+        # 🔍 DEBUG LOG
         self.logger.info(f"RAW WS: {data}")
 
-        if data.get("method") != "public/book":
-            return
+        # 🔥 Handle multiple formats
+        params = data.get("params") or data.get("result") or {}
 
-        params = data.get("params", {})
         channel = params.get("channel", "")
 
-        if not channel.startswith(f"book.{self.sym}"):
+        # Only care about order book messages
+        if "book" not in channel:
             return
 
         book_data = params.get("data", [])
@@ -91,7 +94,7 @@ class CryptoComOrderBook:
         if "bids" not in self.book:
             self.book["bids"] = SortedDict(self._descending_key)
 
-        # Replace entire book (simpler + safer)
+        # Replace full order book
         self.book["asks"].clear()
         self.book["bids"].clear()
 
