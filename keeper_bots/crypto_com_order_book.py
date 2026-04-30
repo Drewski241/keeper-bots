@@ -93,12 +93,21 @@ class CryptoComOrderBook:
         self.book["asks"].clear()
         self.book["bids"].clear()
 
-        for price, size in asks:
-            self.book["asks"][float(price)] = size
+for level in asks:
+    try:
+        price = float(level[0])
+        size = level[1]
+        self.book["asks"][price] = size
+    except Exception as e:
+        self.logger.error(f"Bad ask level: {level} | {e}")
 
-        for price, size in bids:
-            self.book["bids"][float(price)] = size
-
+for level in bids:
+    try:
+        price = float(level[0])
+        size = level[1]
+        self.book["bids"][price] = size
+    except Exception as e:
+        self.logger.error(f"Bad bid level: {level} | {e}")
         if not self.initialized:
             self.logger.info(
                 f"✅ ORDER BOOK INITIALIZED bid={bids[0][0]} ask={asks[0][0]}"
