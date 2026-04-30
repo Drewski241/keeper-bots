@@ -56,7 +56,6 @@ class CryptoComOrderBook:
                 self.__call__(message)
         except Exception as e:
             self.logger.error(f"Websocket listen error: {e}")
-
     def __call__(self, message):
         try:
             data = json.loads(message)
@@ -64,7 +63,6 @@ class CryptoComOrderBook:
             self.logger.error(f"Bad JSON: {message}")
             return
 
-        # 🔍 DEBUG (you NEED this)
         self.logger.info(f"RAW WS: {data}")
 
         params = data.get("params") or data.get("result") or {}
@@ -90,24 +88,27 @@ class CryptoComOrderBook:
         if "bids" not in self.book:
             self.book["bids"] = SortedDict(self._descending_key)
 
+        # ✅ clear existing book
         self.book["asks"].clear()
         self.book["bids"].clear()
 
-for level in asks:
-    try:
-        price = float(level[0])
-        size = level[1]
-        self.book["asks"][price] = size
-    except Exception as e:
-        self.logger.error(f"Bad ask level: {level} | {e}")
+        # ✅ FIXED parsing (3 values → take first 2)
+        for level in asks:
+            try:
+                price = float(level[0])
+                size = level[1]
+                self.book["asks"][price] = size
+            except Exception as e:
+                self.logger.error(f"Bad ask level: {level} | {e}")
 
-for level in bids:
-    try:
-        price = float(level[0])
-        size = level[1]
-        self.book["bids"][price] = size
-    except Exception as e:
-        self.logger.error(f"Bad bid level: {level} | {e}")
+        for level in bids:
+            try:
+                price = float(level[0])
+                size = level[1]
+                self.book["bids"][price] = size
+            except Exception as e:
+                self.logger.error(f"Bad bid level: {level} | {e}")
+
         if not self.initialized:
             self.logger.info(
                 f"✅ ORDER BOOK INITIALIZED bid={bids[0][0]} ask={asks[0][0]}"
