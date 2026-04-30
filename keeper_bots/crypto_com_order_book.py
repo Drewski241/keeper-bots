@@ -12,11 +12,10 @@ class CryptoComOrderBook:
         return -x
 
     def __init__(self, sym, uquote, url, verbose=False, logger=None):
-        self.sym = sym
-        self.market_sym = sym.replace("_", "-")
+        # ✅ FORCE XCH_USD (your requested pair)
+        self.sym = "XCH_USD"
 
-        if len(self.sym.split("_")) != 2:
-            raise ValueError("Symbol must be BASE_QUOTE format")
+        self.market_sym = self.sym.replace("_", "-")
 
         self.uquote = uquote
         self.ws = None
@@ -26,6 +25,8 @@ class CryptoComOrderBook:
         self.initialized = False
         self._lock = asyncio.Lock()
         self.logger = logger or logging.getLogger(__name__)
+
+        self.logger.info(f"OrderBook initialized with symbol: {self.sym}")
 
     async def connect(self):
         self.logger.info(f"Connecting to Crypto.com websocket at {self.url}")
@@ -46,9 +47,7 @@ class CryptoComOrderBook:
             }
         }
 
-        self.logger.info(f"SYMBOL: {self.sym}")
         self.logger.info(f"Subscribing to: {channel}")
-
         await self.ws.send(json.dumps(msg))
 
     async def _listen(self):
@@ -65,15 +64,12 @@ class CryptoComOrderBook:
             self.logger.error(f"Bad JSON: {message}")
             return
 
-        # 🔍 DEBUG LOG
+        # 🔍 DEBUG (you NEED this)
         self.logger.info(f"RAW WS: {data}")
 
-        # 🔥 Handle multiple formats
         params = data.get("params") or data.get("result") or {}
-
         channel = params.get("channel", "")
 
-        # Only care about order book messages
         if "book" not in channel:
             return
 
@@ -94,7 +90,6 @@ class CryptoComOrderBook:
         if "bids" not in self.book:
             self.book["bids"] = SortedDict(self._descending_key)
 
-        # Replace full order book
         self.book["asks"].clear()
         self.book["bids"].clear()
 
@@ -106,7 +101,7 @@ class CryptoComOrderBook:
 
         if not self.initialized:
             self.logger.info(
-                f"Initialized book bid={bids[0][0]} ask={asks[0][0]}"
+                f"✅ ORDER BOOK INITIALIZED bid={bids[0][0]} ask={asks[0][0]}"
             )
 
         self.initialized = True
