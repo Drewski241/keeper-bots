@@ -202,14 +202,15 @@ async def liquidate_vault(
         )
         raise
 
-    if response["code"] != "0":
-        raise ValueError(
-            f"[{vname}] Failed to get Crypto.com account balance: {json.dumps(response)}"
-        )
+    if response is None:
+    raise ValueError(f"[{vname}] No balance returned from Crypto.com")
 
     try:
-        available_xch_balance = float(
-            response["data"][0]["details"][0]["available"]
+        # response is already a single account dict if currency was passed
+        available_xch_balance = float(response["available"])
+    except Exception:
+        raise ValueError(
+            f"[{vname}] Unexpected balance format: {json.dumps(response)}"
         )  # in XCH
     except Exception:
         raise ValueError(
