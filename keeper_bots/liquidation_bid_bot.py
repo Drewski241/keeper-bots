@@ -428,7 +428,6 @@ async def liquidate_vault(
             await asyncio.sleep(retry_delay)
             continue
 
-        if response.get("code") != "0":
             # failed to get order
             log.error(
                 "[%s] Failed to get info for ordId %s. Response: %s",
