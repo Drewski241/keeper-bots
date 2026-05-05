@@ -478,36 +478,43 @@ async def liquidate_vault(
                 hedge_volume,
             )
 
-        break  # ✅ exit retry loop once successful
-            quote_delta = (
-                total_fill_volume * avg_fill_price - okx_fee - bid_amount / MCAT
-            )  # LATER: add melt mojos (if any)
-            base_delta = (
-                collateral_to_receive - total_fill_volume
-            )  # LATER: deduct on-chain tx fee
-            price = crypto_com_order_book.mid_price()
-            if price is None:
-                log.error(
-                    "[%s] Order book mid price unavailable. Cannot calculate PnL", vname
-                )
-                return BidFail.NOT_RECONCILED
+        break  # exit retry loop once successful
 
-            pnl = quote_delta + base_delta * price
+    # ❗ OUTSIDE the retry loop
 
-            log.info(
-                "[%s] PnL: %.2f USD. Change in %s position: %.3f. Chance in stablecoin position: %.3f",
-                vname,
-                pnl,
-                collateral_symbol,
-                base_delta,
-                quote_delta,
-            )
-            return BidFail.NONE
+    quote_delta = (
+        total_fill_volume * avg_fill_price - okx_fee - bid_amount / MCAT
+    )
+    base_delta = collateral_to_receive - total_fill_volume
 
-        log.warning(
-            "[%s] Failed to calculate PnL. All %s attempts unsuccessful", vname, max_retries
+    price = crypto_com_order_book.mid_price()
+    if price is None:
+        log.error(
+            "[%s] Order book mid price unavailable. Cannot calculate PnL",
+            vname,
         )
         return BidFail.NOT_RECONCILED
+
+    pnl = quote_delta + base_delta * price
+
+    log.info(
+        "[%s] PnL: %.2f USD. Change in %s position: %.3f. Change in stablecoin position: %.3f",
+        vname,
+        pnl,
+        collateral_symbol,
+        base_delta,
+        quote_delta,
+    )
+
+    return BidFail.NONE
+
+# if loop failed entirely
+log.warning(
+    "[%s] Failed to calculate PnL. All %s attempts unsuccessful",
+    vname,
+    max_retries,
+)
+return BidFail.NOT_RECONCILED
 
 
 async def run_liquidation_bid_bot():
