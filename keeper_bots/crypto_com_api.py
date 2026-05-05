@@ -10,7 +10,11 @@ class CryptoComTradeAPI:
         self.api_key = api_key
         self.api_secret = api_secret
         self.sandbox = sandbox
-        self.base_url = "https://uat-api.3ona.co/v2" if sandbox else "https://api.crypto.com/v2"
+        self.base_url = (
+            "https://uat-api.3ona.co/exchange/v1"
+            if sandbox else
+            "https://api.crypto.com/exchange/v1"
+        )
         self.client = httpx.AsyncClient()
         self.logger = logging.getLogger(__name__)
 
@@ -60,6 +64,7 @@ class CryptoComTradeAPI:
 
         try:
             response = await self.client.post(self.base_url, json=request)
+            response.raise_for_status()
             result = response.json()
 
             self.logger.info(f"ORDER RESPONSE: {result}")
@@ -84,6 +89,7 @@ class CryptoComTradeAPI:
 
         try:
             response = await self.client.post(self.base_url, json=request)
+            response.raise_for_status()
             result = response.json()
 
             self.logger.info(f"GET ORDER RESPONSE: {result}")
@@ -96,15 +102,22 @@ class CryptoComTradeAPI:
         except Exception as e:
             raise Exception(f"Failed to get order: {e}")
 
+    async def close(self):
+        await self.client.aclose()
+
 
 class CryptoComAccountAPI:
-    def __init__(self, api_key, api_secret, sandbox=False):
+    def __init__(self, api_key, api_secret, sandbox=False, logger=None):
         self.api_key = api_key
         self.api_secret = api_secret
         self.sandbox = sandbox
-        self.base_url = "https://uat-api.3ona.co/v2" if sandbox else "https://api.crypto.com/v2"
+        self.base_url = (
+            "https://uat-api.3ona.co/exchange/v1"
+            if sandbox else
+            "https://api.crypto.com/exchange/v1"
+        )
         self.client = httpx.AsyncClient()
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger or logging.getLogger(__name__)
 
     def _sign_request(self, method, params=None):
         nonce = int(datetime.utcnow().timestamp() * 1000)
@@ -144,8 +157,10 @@ class CryptoComAccountAPI:
 
         try:
             response = await self.client.post(self.base_url, json=request)
+            response.raise_for_status()
             result = response.json()
 
+            # 🔍 keep this for debugging
             self.logger.info(f"BALANCE RESPONSE: {result}")
 
             if result.get("code") != 0:
