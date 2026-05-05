@@ -186,7 +186,29 @@ async def liquidate_vault(
         available_byc_amount / MCAT,
         stablecoin_symbol,
     )
+    # get Crypto.com collateral balance
+    try:
+        response = await accountAPI.get_account_balance(
+            currency=collateral_symbol,
+        )
+    except Exception as err:
+        log.error(
+            "[%s] Failed to get Crypto.com account balance. %s: %s",
+            vname,
+            type(err).__name__,
+            err,
+        )
+        raise
 
+    if response is None:
+        raise ValueError(f"[{vname}] No balance returned from Crypto.com")
+
+    try:
+        available_xch_balance = float(response["available"])
+    except Exception:
+        raise ValueError(
+        f"[{vname}] Unexpected balance format: {json.dumps(response)}"
+    )
     if response is None:
         raise ValueError(f"[{vname}] No balance returned from Crypto.com")
 
