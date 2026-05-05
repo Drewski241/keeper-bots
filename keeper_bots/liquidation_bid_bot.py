@@ -508,13 +508,13 @@ async def liquidate_vault(
 
     return BidFail.NONE
 
-# if loop failed entirely
-log.warning(
-    "[%s] Failed to calculate PnL. All %s attempts unsuccessful",
-    vname,
-    max_retries,
-)
-return BidFail.NOT_RECONCILED
+    # if loop failed entirely
+    log.warning(
+        "[%s] Failed to calculate PnL. All %s attempts unsuccessful",
+        vname,
+        max_retries,
+    )
+    return BidFail.NOT_RECONCILED
 
 
 async def run_liquidation_bid_bot():
