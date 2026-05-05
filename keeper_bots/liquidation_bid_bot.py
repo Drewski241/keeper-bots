@@ -371,7 +371,6 @@ async def liquidate_vault(
             await asyncio.sleep(retry_delay)
             continue
 
-        if response.get("code") != "0":
             error_msg = response.get("msg", "Unknown error")
             # irrecoverable error
             raise OrderRejectedError(
