@@ -661,7 +661,7 @@ async def run_liquidation_bid_bot():
                     collateral_symbol,
                     CONTINUE_DELAY,
                 )
-                asyncio.sleep(CONTINUE_DELAY)
+                await asyncio.sleep(CONTINUE_DELAY)
                 continue
 
             if available_byc_amount is None:
@@ -669,7 +669,7 @@ async def run_liquidation_bid_bot():
                     "Failed to get BYC wallet balance (None). Sleeping for %s seconds",
                     CONTINUE_DELAY,
                 )
-                asyncio.sleep(CONTINUE_DELAY)
+                await asyncio.sleep(CONTINUE_DELAY)
                 continue
 
             # Check how much debt there is. Then borrow an appropriate amount of BYC
