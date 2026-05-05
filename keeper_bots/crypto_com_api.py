@@ -12,7 +12,7 @@ class CryptoComTradeAPI:
         self.api_key = api_key
         self.api_secret = api_secret
         self.sandbox = sandbox
-        self.base_url = "https://uat-api.3ona.co/v2" if sandbox else "https://api.crypto.com/v2"
+        self.base_url = "https://uat-api.3ona.co/exchange/v1" if sandbox else "https://api.crypto.com/exchange/v1"
         self.client = httpx.AsyncClient()
     
     def _sign_request(self, method, endpoint, params=None):
