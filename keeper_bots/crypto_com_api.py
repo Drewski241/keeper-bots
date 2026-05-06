@@ -11,9 +11,9 @@ class CryptoComTradeAPI:
         self.api_secret = api_secret
         self.sandbox = sandbox
         self.base_url = (
-            "https://uat-api.3ona.co/exchange/v1"
+            "https://uat-api.3ona.co/v1"
             if sandbox else
-            "https://api.crypto.com/exchange/v1"
+            "https://api.crypto.com/v1"
         )
         self.client = httpx.AsyncClient()
         self.logger = logging.getLogger(__name__)
