@@ -1,11 +1,13 @@
 import httpx
 import hmac
 import hashlib
-from datetime import datetime
+import json
+import time
+import os
 import logging
 
 
-class CryptoComTradeAPI:
+class CryptoComBaseAPI:
     def __init__(self, api_key, api_secret, sandbox=False):
         self.api_key = api_key
         self.api_secret = api_secret
@@ -15,18 +17,23 @@ class CryptoComTradeAPI:
             if sandbox else
             "https://api.crypto.com/v2/"
         )
-        self.client = httpx.AsyncClient()
-        self.logger = logging.getLogger(__name__)
+        self.client = httpx.AsyncClient(timeout=10.0)
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._nonce_counter = 0
+
+    def _get_nonce(self):
+        # Prevent collisions even within same ms
+        self._nonce_counter += 1
+        return int(time.time() * 1000) * 1000 + self._nonce_counter
 
     def _sign_request(self, method, params=None):
-        nonce = int(datetime.utcnow().timestamp() * 1000)
+        nonce = self._get_nonce()
 
         if params is None:
             params = {}
 
-        param_str = ""
-        if params:
-            param_str = "".join(f"{k}{v}" for k, v in sorted(params.items()))
+        # ✅ canonical serialization (CRITICAL FIX)
+        param_str = json.dumps(params, separators=(",", ":"), sort_keys=True)
 
         sig_payload = f"{method}{nonce}{self.api_key}{param_str}{nonce}"
 
@@ -45,7 +52,42 @@ class CryptoComTradeAPI:
             "sig": signature,
         }
 
-    async def place_order(self, instrument_id, side, type_, size, price=None, **kwargs):
+    async def _post(self, method, params=None):
+        request = self._sign_request(method, params)
+
+        try:
+            response = await self.client.post(self.base_url, json=request)
+            response.raise_for_status()
+            result = response.json()
+
+            if result.get("code") != 0:
+                raise ValueError(f"API error: {result}")
+
+            return result.get("result", {})
+
+        except httpx.HTTPStatusError as e:
+            raise Exception(f"HTTP error: {e.response.text}")
+        except Exception:
+            raise
+
+    async def close(self):
+        await self.client.aclose()
+
+
+# =========================
+# TRADE API
+# =========================
+class CryptoComTradeAPI(CryptoComBaseAPI):
+    async def place_order(
+        self,
+        instrument_id,
+        side,
+        type_,
+        size,
+        price=None,
+        client_oid=None,
+        **kwargs,
+    ):
         method = "private/create-order"
 
         params = {
@@ -55,27 +97,22 @@ class CryptoComTradeAPI:
             "quantity": str(size),
         }
 
-        if type_.upper() == "LIMIT" and price:
+        if type_.upper() == "LIMIT":
+            if price is None:
+                raise ValueError("LIMIT order requires price")
             params["price"] = str(price)
+
+        # ✅ client order id (VERY useful for tracking)
+        if client_oid:
+            params["client_oid"] = client_oid
+        else:
+            params["client_oid"] = str(self._get_nonce())
 
         params.update(kwargs)
 
-        request = self._sign_request(method, params)
-
-        try:
-            response = await self.client.post(self.base_url, json=request)
-            response.raise_for_status()
-            result = response.json()
-
-            self.logger.info(f"ORDER RESPONSE: {result}")
-
-            if result.get("code") != 0:
-                raise ValueError(f"Order placement failed: {result}")
-
-            return result.get("result", {})
-
-        except Exception as e:
-            raise Exception(f"Failed to place order: {e}")
+        result = await self._post(method, params)
+        self.logger.info(f"Order placed: {result}")
+        return result
 
     async def get_order(self, instrument_id, order_id):
         method = "private/get-order-detail"
@@ -85,67 +122,14 @@ class CryptoComTradeAPI:
             "order_id": order_id,
         }
 
-        request = self._sign_request(method, params)
-
-        try:
-            response = await self.client.post(self.base_url, json=request)
-            response.raise_for_status()
-            result = response.json()
-
-            self.logger.info(f"GET ORDER RESPONSE: {result}")
-
-            if result.get("code") != 0:
-                raise ValueError(f"Failed to get order: {result}")
-
-            return result.get("result", {})
-
-        except Exception as e:
-            raise Exception(f"Failed to get order: {e}")
-
-    async def close(self):
-        await self.client.aclose()
+        result = await self._post(method, params)
+        return result
 
 
-class CryptoComAccountAPI:
-    def __init__(self, api_key, api_secret, sandbox=False, logger=None):
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.sandbox = sandbox
-        self.base_url = (
-            "https://uat-api.3ona.co/v2/"
-            if sandbox else
-            "https://api.crypto.com/v2/"
-        )
-        self.client = httpx.AsyncClient()
-        self.logger = logger or logging.getLogger(__name__)
-
-    def _sign_request(self, method, params=None):
-        nonce = int(datetime.utcnow().timestamp() * 1000)
-
-        if params is None:
-            params = {}
-
-        param_str = ""
-        if params:
-            param_str = "".join(f"{k}{v}" for k, v in sorted(params.items()))
-
-        sig_payload = f"{method}{nonce}{self.api_key}{param_str}{nonce}"
-
-        signature = hmac.new(
-            self.api_secret.encode(),
-            sig_payload.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-
-        return {
-            "id": nonce,
-            "method": method,
-            "api_key": self.api_key,
-            "params": params,
-            "nonce": nonce,
-            "sig": signature,
-        }
-
+# =========================
+# ACCOUNT API
+# =========================
+class CryptoComAccountAPI(CryptoComBaseAPI):
     async def get_account_balance(self, currency=None):
         method = "private/get-account-summary"
 
@@ -153,31 +137,14 @@ class CryptoComAccountAPI:
         if currency:
             params["currency"] = currency
 
-        request = self._sign_request(method, params)
+        result = await self._post(method, params)
 
-        try:
-            response = await self.client.post(self.base_url, json=request)
-            response.raise_for_status()
-            result = response.json()
+        accounts = result.get("accounts", [])
 
-            # 🔍 keep this for debugging
-            self.logger.info(f"BALANCE RESPONSE: {result}")
+        if currency:
+            return next(
+                (acc for acc in accounts if acc["currency"] == currency),
+                None,
+            )
 
-            if result.get("code") != 0:
-                raise ValueError(f"API error: {result}")
-
-            accounts = result.get("result", {}).get("accounts", [])
-
-            if currency:
-                for acc in accounts:
-                    if acc["currency"] == currency:
-                        return acc
-                return None
-
-            return accounts
-
-        except Exception as e:
-            raise Exception(f"Failed to get account balance: {e}")
-
-    async def close(self):
-        await self.client.aclose()
+        return accounts
