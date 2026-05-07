@@ -7,11 +7,11 @@ import logging
 
 class CryptoComBaseAPI:
     def __init__(self, api_key, api_secret, sandbox=False):
-        self.api_key = api_key
-        self.api_secret = api_secret
+        self.api_key = api_key.strip()
+        self.api_secret = api_secret.strip()
         self.sandbox = sandbox
 
-        # ✅ Correct Crypto.com Exchange endpoint
+        # ✅ Correct Exchange API endpoint
         self.base_url = (
             "https://uat-api.3ona.co/exchange/v1/"
             if sandbox else
@@ -28,39 +28,42 @@ class CryptoComBaseAPI:
             limits=limits,
         )
 
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = logging.getLogger(
+            self.__class__.__name__
+        )
 
-        # Used to guarantee strictly increasing nonce
+        # Strictly increasing nonce/id
         self._last_nonce = 0
 
-    # =========================================================
-    # NONCE
-    # =========================================================
-    def _get_nonce(self):
+    # =====================================================
+    # NONCE / REQUEST ID
+    # =====================================================
+    def _get_request_id(self):
         """
-        Crypto.com requires monotonically increasing
-        millisecond timestamp nonces.
+        Crypto.com expects monotonically increasing
+        millisecond timestamps.
+
+        We use the same value for:
+        - id
+        - nonce
         """
 
-        nonce = int(time.time() * 1000)
+        request_id = int(time.time() * 1000)
 
-        # Guarantee uniqueness
-        if nonce <= self._last_nonce:
-            nonce = self._last_nonce + 1
+        if request_id <= self._last_nonce:
+            request_id = self._last_nonce + 1
 
-        self._last_nonce = nonce
+        self._last_nonce = request_id
 
-        return nonce
+        return request_id
 
-    # =========================================================
+    # =====================================================
     # PARAM SERIALIZATION
-    # =========================================================
+    # =====================================================
     def _params_to_str(self, obj):
         """
-        Crypto.com Exchange canonical parameter serializer.
-
-        IMPORTANT:
-        DO NOT use json.dumps() for signature generation.
+        Canonical parameter serializer required by
+        Crypto.com Exchange API.
         """
 
         if obj is None:
@@ -78,26 +81,31 @@ class CryptoComBaseAPI:
                 for item in obj
             )
 
+        if isinstance(obj, bool):
+            return str(obj).lower()
+
         return str(obj)
 
-    # =========================================================
+    # =====================================================
     # SIGN REQUEST
-    # =========================================================
+    # =====================================================
     def _sign_request(self, method, params=None):
-        nonce = self._get_nonce()
+
+        request_id = self._get_request_id()
 
         if params is None:
             params = {}
 
-        # ✅ Correct canonical param string
+        # ✅ Correct canonical param format
         param_str = self._params_to_str(params)
 
+        # ✅ Correct Crypto.com signing payload
         payload = (
             f"{method}"
-            f"{nonce}"
+            f"{request_id}"
             f"{self.api_key}"
             f"{param_str}"
-            f"{nonce}"
+            f"{request_id}"
         )
 
         signature = hmac.new(
@@ -106,26 +114,34 @@ class CryptoComBaseAPI:
             hashlib.sha256,
         ).hexdigest()
 
+        # Optional debug logging
+        self.logger.debug(
+            "AUTH payload=%s sig=%s",
+            payload,
+            signature,
+        )
+
         return {
-            "id": nonce,
+            "id": request_id,
             "method": method,
             "api_key": self.api_key,
             "params": params,
-            "nonce": nonce,
+            "nonce": request_id,
             "sig": signature,
         }
 
-    # =========================================================
+    # =====================================================
     # POST REQUEST
-    # =========================================================
+    # =====================================================
     async def _post(self, method, params=None):
+
         request_payload = self._sign_request(
             method,
             params,
         )
 
         try:
-            # ✅ Exchange API expects POST to root endpoint
+            # ✅ POST to root endpoint
             response = await self.client.post(
                 self.base_url,
                 json=request_payload,
@@ -141,7 +157,7 @@ class CryptoComBaseAPI:
                 result,
             )
 
-            # API-level errors
+            # API-level error handling
             if result.get("code") != 0:
                 raise ValueError(
                     f"Crypto.com API error: {result}"
@@ -167,9 +183,9 @@ class CryptoComBaseAPI:
         await self.client.aclose()
 
 
-# =========================================================
+# =====================================================
 # TRADE API
-# =========================================================
+# =====================================================
 class CryptoComTradeAPI(CryptoComBaseAPI):
 
     async def place_order(
@@ -193,8 +209,9 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
             "quantity": str(size),
         }
 
-        # LIMIT order validation
+        # LIMIT orders require price
         if order_type == "LIMIT":
+
             if price is None:
                 raise ValueError(
                     "LIMIT order requires price"
@@ -202,11 +219,11 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
 
             params["price"] = str(price)
 
-        # Strongly recommended by exchanges
+        # Strongly recommended
         params["client_oid"] = (
             client_oid
             if client_oid
-            else str(self._get_nonce())
+            else str(self._get_request_id())
         )
 
         # Additional optional params
@@ -259,9 +276,9 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
         )
 
 
-# =========================================================
+# =====================================================
 # ACCOUNT API
-# =========================================================
+# =====================================================
 class CryptoComAccountAPI(CryptoComBaseAPI):
 
     async def get_account_balance(
