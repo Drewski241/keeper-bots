@@ -1,7 +1,6 @@
 import httpx
 import hmac
 import hashlib
-import json
 import time
 import logging
 
@@ -12,14 +11,13 @@ class CryptoComBaseAPI:
         self.api_secret = api_secret
         self.sandbox = sandbox
 
-        # ✅ Correct Exchange REST API endpoints
+        # ✅ Correct Crypto.com Exchange endpoint
         self.base_url = (
             "https://uat-api.3ona.co/exchange/v1/"
             if sandbox else
             "https://api.crypto.com/exchange/v1/"
         )
 
-        # ✅ Better connection handling
         limits = httpx.Limits(
             max_keepalive_connections=20,
             max_connections=100,
@@ -32,29 +30,69 @@ class CryptoComBaseAPI:
 
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # Prevent nonce collisions
-        self._nonce_counter = 0
+        # Used to guarantee strictly increasing nonce
+        self._last_nonce = 0
 
+    # =========================================================
+    # NONCE
+    # =========================================================
     def _get_nonce(self):
-        self._nonce_counter += 1
+        """
+        Crypto.com requires monotonically increasing
+        millisecond timestamp nonces.
+        """
 
-        # millisecond timestamp + increment
-        return int(time.time() * 1000) * 1000 + self._nonce_counter
+        nonce = int(time.time() * 1000)
 
+        # Guarantee uniqueness
+        if nonce <= self._last_nonce:
+            nonce = self._last_nonce + 1
+
+        self._last_nonce = nonce
+
+        return nonce
+
+    # =========================================================
+    # PARAM SERIALIZATION
+    # =========================================================
+    def _params_to_str(self, obj):
+        """
+        Crypto.com Exchange canonical parameter serializer.
+
+        IMPORTANT:
+        DO NOT use json.dumps() for signature generation.
+        """
+
+        if obj is None:
+            return ""
+
+        if isinstance(obj, dict):
+            return "".join(
+                f"{key}{self._params_to_str(obj[key])}"
+                for key in sorted(obj)
+            )
+
+        if isinstance(obj, list):
+            return "".join(
+                self._params_to_str(item)
+                for item in obj
+            )
+
+        return str(obj)
+
+    # =========================================================
+    # SIGN REQUEST
+    # =========================================================
     def _sign_request(self, method, params=None):
         nonce = self._get_nonce()
 
         if params is None:
             params = {}
 
-        # ✅ Canonical param serialization
-        param_str = json.dumps(
-            params,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        # ✅ Correct canonical param string
+        param_str = self._params_to_str(params)
 
-        sig_payload = (
+        payload = (
             f"{method}"
             f"{nonce}"
             f"{self.api_key}"
@@ -64,7 +102,7 @@ class CryptoComBaseAPI:
 
         signature = hmac.new(
             self.api_secret.encode("utf-8"),
-            sig_payload.encode("utf-8"),
+            payload.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
 
@@ -77,15 +115,19 @@ class CryptoComBaseAPI:
             "sig": signature,
         }
 
+    # =========================================================
+    # POST REQUEST
+    # =========================================================
     async def _post(self, method, params=None):
-        request_payload = self._sign_request(method, params)
-
-        # ✅ Correct endpoint routing
-        url = f"{self.base_url}{method}"
+        request_payload = self._sign_request(
+            method,
+            params,
+        )
 
         try:
+            # ✅ Exchange API expects POST to root endpoint
             response = await self.client.post(
-                url,
+                self.base_url,
                 json=request_payload,
             )
 
@@ -93,14 +135,13 @@ class CryptoComBaseAPI:
 
             result = response.json()
 
-            # Helpful debug logging
             self.logger.debug(
-                "API response for %s: %s",
+                "Crypto.com response (%s): %s",
                 method,
                 result,
             )
 
-            # Crypto.com API-level errors
+            # API-level errors
             if result.get("code") != 0:
                 raise ValueError(
                     f"Crypto.com API error: {result}"
@@ -110,11 +151,14 @@ class CryptoComBaseAPI:
 
         except httpx.HTTPStatusError as e:
             raise Exception(
-                f"HTTP {e.response.status_code}: {e.response.text}"
+                f"HTTP {e.response.status_code}: "
+                f"{e.response.text}"
             )
 
         except httpx.TimeoutException:
-            raise Exception("Request timed out")
+            raise Exception(
+                "Crypto.com request timed out"
+            )
 
         except Exception:
             raise
@@ -123,9 +167,9 @@ class CryptoComBaseAPI:
         await self.client.aclose()
 
 
-# ==========================================
+# =========================================================
 # TRADE API
-# ==========================================
+# =========================================================
 class CryptoComTradeAPI(CryptoComBaseAPI):
 
     async def place_order(
@@ -168,7 +212,10 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
         # Additional optional params
         params.update(kwargs)
 
-        result = await self._post(method, params)
+        result = await self._post(
+            method,
+            params,
+        )
 
         self.logger.info(
             "Order placed successfully: %s",
@@ -189,7 +236,10 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
             "order_id": order_id,
         }
 
-        return await self._post(method, params)
+        return await self._post(
+            method,
+            params,
+        )
 
     async def cancel_order(
         self,
@@ -203,12 +253,15 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
             "order_id": order_id,
         }
 
-        return await self._post(method, params)
+        return await self._post(
+            method,
+            params,
+        )
 
 
-# ==========================================
+# =========================================================
 # ACCOUNT API
-# ==========================================
+# =========================================================
 class CryptoComAccountAPI(CryptoComBaseAPI):
 
     async def get_account_balance(
@@ -222,9 +275,15 @@ class CryptoComAccountAPI(CryptoComBaseAPI):
         if currency:
             params["currency"] = currency
 
-        result = await self._post(method, params)
+        result = await self._post(
+            method,
+            params,
+        )
 
-        accounts = result.get("accounts", [])
+        accounts = result.get(
+            "accounts",
+            [],
+        )
 
         if currency:
             return next(
