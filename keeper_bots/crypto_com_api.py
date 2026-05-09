@@ -7,8 +7,10 @@ import logging
 
 class CryptoComBaseAPI:
     def __init__(self, api_key, api_secret, sandbox=False):
+        # ✅ Remove accidental whitespace/newlines
         self.api_key = api_key.strip()
         self.api_secret = api_secret.strip()
+
         self.sandbox = sandbox
 
         # ✅ Correct Exchange API endpoint
@@ -32,24 +34,23 @@ class CryptoComBaseAPI:
             self.__class__.__name__
         )
 
-        # Strictly increasing nonce/id
+        # Monotonic request IDs / nonces
         self._last_nonce = 0
+
+        # ✅ Helpful startup log
+        self.logger.info(
+            "Crypto.com environment: %s",
+            "SANDBOX" if sandbox else "PRODUCTION",
+        )
 
     # =====================================================
     # NONCE / REQUEST ID
     # =====================================================
     def _get_request_id(self):
-        """
-        Crypto.com expects monotonically increasing
-        millisecond timestamps.
-
-        We use the same value for:
-        - id
-        - nonce
-        """
 
         request_id = int(time.time() * 1000)
 
+        # Guarantee strictly increasing values
         if request_id <= self._last_nonce:
             request_id = self._last_nonce + 1
 
@@ -61,10 +62,6 @@ class CryptoComBaseAPI:
     # PARAM SERIALIZATION
     # =====================================================
     def _params_to_str(self, obj):
-        """
-        Canonical parameter serializer required by
-        Crypto.com Exchange API.
-        """
 
         if obj is None:
             return ""
@@ -96,8 +93,13 @@ class CryptoComBaseAPI:
         if params is None:
             params = {}
 
-        # ✅ Correct canonical param format
-        param_str = self._params_to_str(params)
+        # ✅ IMPORTANT:
+        # Empty params must serialize to ""
+        # NOT "{}"
+        param_str = ""
+
+        if params:
+            param_str = self._params_to_str(params)
 
         # ✅ Correct Crypto.com signing payload
         payload = (
@@ -114,9 +116,11 @@ class CryptoComBaseAPI:
             hashlib.sha256,
         ).hexdigest()
 
-        # Optional debug logging
+        # ✅ Debug logging for auth troubleshooting
         self.logger.debug(
-            "AUTH payload=%s sig=%s",
+            "AUTH method=%s request_id=%s payload=%s sig=%s",
+            method,
+            request_id,
             payload,
             signature,
         )
@@ -141,7 +145,7 @@ class CryptoComBaseAPI:
         )
 
         try:
-            # ✅ POST to root endpoint
+            # ✅ Exchange API expects POST to root endpoint
             response = await self.client.post(
                 self.base_url,
                 json=request_payload,
@@ -157,7 +161,7 @@ class CryptoComBaseAPI:
                 result,
             )
 
-            # API-level error handling
+            # API-level errors
             if result.get("code") != 0:
                 raise ValueError(
                     f"Crypto.com API error: {result}"
@@ -209,7 +213,7 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
             "quantity": str(size),
         }
 
-        # LIMIT orders require price
+        # LIMIT order validation
         if order_type == "LIMIT":
 
             if price is None:
@@ -219,7 +223,7 @@ class CryptoComTradeAPI(CryptoComBaseAPI):
 
             params["price"] = str(price)
 
-        # Strongly recommended
+        # Strongly recommended by exchanges
         params["client_oid"] = (
             client_oid
             if client_oid
