@@ -361,24 +361,23 @@ async def liquidate_vault(
                 type_="MARKET",
                 size=hedge_volume,
             )
-        except Exception as err:
-            # keep trying in case of error as we need to close our position
-            log.error(
-                "[%s] Failed to place order. %s: %s. Retrying in %s seconds",
-                vname,
-                type(err).__name__,
-                err,
-                retry_delay,
-            )
-            await asyncio.sleep(retry_delay)
-            continue
+    except Exception as err:
+        # keep trying in case of error as we need to close our position
+        log.error(
+            "[%s] Failed to place order. %s: %s. Retrying in %s seconds",
+            vname,
+            type(err).__name__,
+            err,
+            retry_delay,
+        )
+        await asyncio.sleep(retry_delay)
+        continue
 
-            error_msg = response.get("msg", "Unknown error")
-            # irrecoverable error
-            raise OrderRejectedError(
-                f"[{vname}] Failed to place order: {error_msg}"
-            )
-
+        error_msg = response.get("msg", "Unknown error")
+        # irrecoverable error
+        raise OrderRejectedError(
+            f"[{vname}] Failed to place order: {error_msg}"
+        )         
         try:
             ordId = response.get("order_id")
         except Exception:
