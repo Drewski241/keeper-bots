@@ -344,8 +344,10 @@ async def liquidate_vault(
     retry_delay = 2
     max_retries = 30
     cnt = 0
+
     while cnt < max_retries:
         cnt += 1
+
         log.info(
             "[%s] Attempt no. %s/%s to place market sell order for %.12f %s on Crypto.com",
             vname,
@@ -354,6 +356,7 @@ async def liquidate_vault(
             hedge_volume,
             collateral_symbol,
         )
+
         try:
             response = await tradeAPI.place_order(
                 instrument_id=market_symbol,
@@ -361,26 +364,30 @@ async def liquidate_vault(
                 type_="MARKET",
                 size=hedge_volume,
             )
-    except Exception as err:
-    # keep trying in case of error as we need to close our position
-    log.error(
-        "[%s] Failed to place order. %s: %s. Retrying in %s seconds",
-        vname,
-        type(err).__name__,
-        err,
-        retry_delay,
-    )
-    await asyncio.sleep(retry_delay)
-    continue         
-    try:
-        ordId = response.get("order_id")
-    except Exception:
-        log.error(
-             "[%s] Failed to get ordId. Unrecognized response format: %s",
-              vname,
-            json.dumps(response),
-        )
-        raise
+
+        except Exception as err:
+            # keep trying in case of error as we need to close our position
+            log.error(
+                "[%s] Failed to place order. %s: %s. Retrying in %s seconds",
+                vname,
+                type(err).__name__,
+                err,
+                retry_delay,
+            )
+
+            await asyncio.sleep(retry_delay)
+            continue
+
+        try:
+            ordId = response.get("order_id")
+
+        except Exception:
+            log.error(
+                "[%s] Failed to get ordId. Unrecognized response format: %s",
+                vname,
+                json.dumps(response),
+            )
+            raise
 
         break
 
