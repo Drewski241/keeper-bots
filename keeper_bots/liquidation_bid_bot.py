@@ -16,8 +16,6 @@ from enum import Enum
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from chia.types.blockchain_format.program import Program
 
 from circuit_cli.client import APIError, CircuitRPCClient
