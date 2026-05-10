@@ -425,7 +425,7 @@ async def liquidate_vault(
             continue
 
         # ✅ Handle bad API response properly
-        if response.get("code") != "0":
+        if response.get("code") != 0:
             log.error(
                 "[%s] Failed to get info for ordId %s. Response: %s",
                 vname,
