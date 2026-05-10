@@ -372,15 +372,15 @@ async def liquidate_vault(
     )
     await asyncio.sleep(retry_delay)
     continue         
-        try:
-            ordId = response.get("order_id")
-        except Exception:
-            log.error(
-                "[%s] Failed to get ordId. Unrecognized response format: %s",
-                vname,
-                json.dumps(response),
-            )
-            raise
+    try:
+        ordId = response.get("order_id")
+    except Exception:
+        log.error(
+             "[%s] Failed to get ordId. Unrecognized response format: %s",
+              vname,
+            json.dumps(response),
+        )
+        raise
 
         break
 
