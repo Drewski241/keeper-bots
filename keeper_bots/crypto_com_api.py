@@ -7,41 +7,57 @@ import logging
 
 class CryptoComBaseAPI:
     def __init__(self, api_key, api_secret, sandbox=False):
-        # ✅ Remove accidental whitespace/newlines
-        self.api_key = api_key.strip()
-        self.api_secret = api_secret.strip()
-
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.sandbox = sandbox
 
-        # ✅ Correct Exchange API endpoint
         self.base_url = (
             "https://uat-api.3ona.co/exchange/v1/"
             if sandbox else
             "https://api.crypto.com/exchange/v1/"
         )
 
-        limits = httpx.Limits(
-            max_keepalive_connections=20,
-            max_connections=100,
+        self.client = httpx.AsyncClient(timeout=10.0)
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._nonce_counter = 0
+
+    def _get_nonce(self):
+        self._nonce_counter += 1
+        return int(time.time() * 1000) * 1000 + self._nonce_counter
+
+    def _sign_request(self, method, params=None):
+        nonce = self._get_nonce()
+
+        if params is None:
+            params = {}
+
+        param_str = ""
+
+        for key in sorted(params.keys()):
+            param_str += key + str(params[key])
+
+        sig_payload = (
+            method
+            + str(nonce)
+            + self.api_key
+            + param_str
+            + str(nonce)
         )
 
-        self.client = httpx.AsyncClient(
-            timeout=10.0,
-            limits=limits,
-        )
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            sig_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
-        self.logger = logging.getLogger(
-            self.__class__.__name__
-        )
-
-        # Monotonic request IDs / nonces
-        self._last_nonce = 0
-
-        # ✅ Helpful startup log
-        self.logger.info(
-            "Crypto.com environment: %s",
-            "SANDBOX" if sandbox else "PRODUCTION",
-        )
+        return {
+            "id": nonce,
+            "method": method,
+            "api_key": self.api_key,
+            "params": params,
+            "nonce": nonce,
+            "sig": signature,
+        }
 
     # =====================================================
     # NONCE / REQUEST ID
