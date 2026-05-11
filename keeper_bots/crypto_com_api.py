@@ -87,52 +87,40 @@ class CryptoComBaseAPI:
     # SIGN REQUEST
     # =====================================================
     def _sign_request(self, method, params=None):
+    nonce = self._get_nonce()
 
-        request_id = self._get_request_id()
+    if params is None:
+        params = {}
 
-        if params is None:
-            params = {}
+    # Crypto.com requires flattened sorted params
+    param_str = ""
 
-        # ✅ IMPORTANT:
-        # Empty params must serialize to ""
-        # NOT "{}"
-        param_str = ""
+    for key in sorted(params.keys()):
+        param_str += key + str(params[key])
 
-        if params:
-            param_str = self._params_to_str(params)
+    sig_payload = (
+        method
+        + str(nonce)
+        + self.api_key
+        + param_str
+        + str(nonce)
+    )
 
-        # ✅ Correct Crypto.com signing payload
-        payload = (
-            f"{method}"
-            f"{request_id}"
-            f"{self.api_key}"
-            f"{param_str}"
-            f"{request_id}"
-        )
+    signature = hmac.new(
+        self.api_secret.encode("utf-8"),
+        sig_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
-        signature = hmac.new(
-            self.api_secret.encode("utf-8"),
-            payload.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+    return {
+        "id": nonce,
+        "method": method,
+        "api_key": self.api_key,
+        "params": params,
+        "nonce": nonce,
+        "sig": signature,
+    }
 
-        # ✅ Debug logging for auth troubleshooting
-        self.logger.debug(
-            "AUTH method=%s request_id=%s payload=%s sig=%s",
-            method,
-            request_id,
-            payload,
-            signature,
-        )
-
-        return {
-            "id": request_id,
-            "method": method,
-            "api_key": self.api_key,
-            "params": params,
-            "nonce": request_id,
-            "sig": signature,
-        }
 
     # =====================================================
     # POST REQUEST
