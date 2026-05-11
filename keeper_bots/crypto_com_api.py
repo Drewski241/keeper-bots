@@ -87,39 +87,39 @@ class CryptoComBaseAPI:
     # SIGN REQUEST
     # =====================================================
     def _sign_request(self, method, params=None):
-    nonce = self._get_nonce()
+        nonce = self._get_nonce()
 
-    if params is None:
-        params = {}
+        if params is None:
+            params = {}
 
-    # Crypto.com requires flattened sorted params
-    param_str = ""
+        # Crypto.com requires flattened sorted params
+        param_str = ""
 
-    for key in sorted(params.keys()):
-        param_str += key + str(params[key])
+        for key in sorted(params.keys()):
+            param_str += key + str(params[key])
 
-    sig_payload = (
-        method
-        + str(nonce)
-        + self.api_key
-        + param_str
-        + str(nonce)
-    )
+        sig_payload = (
+            method
+            + str(nonce)
+            + self.api_key
+            + param_str
+            + str(nonce)
+        )
 
-    signature = hmac.new(
-        self.api_secret.encode("utf-8"),
-        sig_payload.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            sig_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
-    return {
-        "id": nonce,
-        "method": method,
-        "api_key": self.api_key,
-        "params": params,
-        "nonce": nonce,
-        "sig": signature,
-    }
+        return {
+            "id": nonce,
+            "method": method,
+            "api_key": self.api_key,
+            "params": params,
+            "nonce": nonce,
+            "sig": signature,
+        }
 
 
     # =====================================================
