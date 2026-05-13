@@ -544,8 +544,6 @@ async def run_liquidation_bid_bot():
         f"{args.private_key_prefix.upper()}CRYPTO_COM_API_{args.environment.upper()}_SECRET",
         None,
     )
-    print("KEY:", key[:8] if key else None)
-    print("SECRET:", secret[:8] if secret else None)
     if None in [key, secret]:
         raise ValueError("Crypto.com API key not found. Use -k option to specify prefix")
 
