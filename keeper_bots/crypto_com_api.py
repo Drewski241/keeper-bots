@@ -64,6 +64,7 @@ class CryptoComBaseAPI:
 
         return str(obj)
 
+
     # =====================================================
     # SIGN REQUEST
     # =====================================================
@@ -74,29 +75,26 @@ class CryptoComBaseAPI:
 
         nonce = self._get_nonce()
 
-        # request id separate from nonce
-        request_id = nonce
-
-        # flatten params exactly
+        # Flatten params exactly
         param_str = self._params_to_str(params)
 
-        # EXACT Crypto.com signing payload
-        payload = (
+        # EXACT payload required by Crypto.com
+        sig_payload = (
             method
-            + str(request_id)
+            + str(nonce)
             + self.api_key
             + param_str
             + str(nonce)
         )
 
         signature = hmac.new(
-            self.api_secret.encode("utf-8"),
-            payload.encode("utf-8"),
-            hashlib.sha256,
+            bytes(self.api_secret, "utf-8"),
+            msg=bytes(sig_payload, "utf-8"),
+            digestmod=hashlib.sha256,
         ).hexdigest()
 
         return {
-            "id": request_id,
+            "id": nonce,
             "method": method,
             "api_key": self.api_key,
             "params": params,
