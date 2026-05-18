@@ -252,6 +252,45 @@ class CryptoComAccountAPI(CryptoComBaseAPI):
 
         method = "private/get-account-summary"
 
+class CryptoComAccountAPI:
+    """Crypto.com Account API client for managing balances"""
+    
+    def __init__(self, api_key, api_secret, sandbox=False):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.sandbox = sandbox
+        self.base_url = "https://uat-api.3ona.co/exchange/v1" if sandbox else "https://api.crypto.com/exchange/v1"
+        self.client = httpx.AsyncClient()
+    
+    def _sign_request(self, method, endpoint, params=None):
+        """Sign request with API key and secret"""
+        nonce = str(int(datetime.utcnow().timestamp() * 1000))
+        
+        if params is None:
+            params = {}
+        
+        params_str = json.dumps(params, separators=(',', ':'), sort_keys=True)
+        message = f"{method}{endpoint}{params_str}{nonce}"
+        
+        signature = hmac.new(
+            self.api_secret.encode('utf-8'),
+            message.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        return signature, nonce
+    
+    async def get_account_balance(self, currency=None):
+        """Get account balance from Crypto.com
+        
+        Args:
+            currency: Optional specific currency to query (e.g., 'XCH')
+        
+        Returns:
+            Balance information
+        """
+        endpoint = "/private/get-account-summary"
+        
         params = {}
 
         if currency:
