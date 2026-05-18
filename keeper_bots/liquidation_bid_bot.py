@@ -186,14 +186,12 @@ async def liquidate_vault(
         available_byc_amount / MCAT,
         stablecoin_symbol,
     )
-
     # get Crypto.com collateral balance
     try:
         response = await accountAPI.get_account_balance(
             currency=collateral_symbol,
         )
     except Exception as err:
-        # keep trying in case of error as we need to close our position
         log.error(
             "[%s] Failed to get Crypto.com account balance. %s: %s",
             vname,
@@ -202,18 +200,23 @@ async def liquidate_vault(
         )
         raise
 
-    if response["code"] != "0":
-        raise ValueError(
-            f"[{vname}] Failed to get Crypto.com account balance: {json.dumps(response)}"
-        )
+    if response is None:
+        raise ValueError(f"[{vname}] No balance returned from Crypto.com")
 
     try:
-        available_xch_balance = float(
-            response["data"][0]["details"][0]["available"]
-        )  # in XCH
+        available_xch_balance = float(response["available"])
     except Exception:
         raise ValueError(
-            f"[{vname}] Unexpected response format getting Crypto.com account balance: {json.dumps(response)}"
+        f"[{vname}] Unexpected balance format: {json.dumps(response)}"
+    )
+    if response is None:
+        raise ValueError(f"[{vname}] No balance returned from Crypto.com")
+
+    try:
+        available_xch_balance = float(response["available"])
+    except Exception:
+        raise ValueError(
+            f"[{vname}] Unexpected balance format: {json.dumps(response)}"
         )
 
     log.info(
@@ -341,8 +344,10 @@ async def liquidate_vault(
     retry_delay = 2
     max_retries = 30
     cnt = 0
+
     while cnt < max_retries:
         cnt += 1
+
         log.info(
             "[%s] Attempt no. %s/%s to place market sell order for %.12f %s on Crypto.com",
             vname,
@@ -351,6 +356,7 @@ async def liquidate_vault(
             hedge_volume,
             collateral_symbol,
         )
+
         try:
             response = await tradeAPI.place_order(
                 instrument_id=market_symbol,
@@ -358,6 +364,7 @@ async def liquidate_vault(
                 type_="MARKET",
                 size=hedge_volume,
             )
+
         except Exception as err:
             # keep trying in case of error as we need to close our position
             log.error(
@@ -367,18 +374,13 @@ async def liquidate_vault(
                 err,
                 retry_delay,
             )
+
             await asyncio.sleep(retry_delay)
             continue
 
-        if response.get("code") != "0":
-            error_msg = response.get("msg", "Unknown error")
-            # irrecoverable error
-            raise OrderRejectedError(
-                f"[{vname}] Failed to place order: {error_msg}"
-            )
-
         try:
             ordId = response.get("order_id")
+
         except Exception:
             log.error(
                 "[%s] Failed to get ordId. Unrecognized response format: %s",
@@ -412,12 +414,13 @@ async def liquidate_vault(
             max_retries,
             ordId,
         )
+
         try:
             response = await tradeAPI.get_order(
-                instrument_id=market_symbol, order_id=ordId
+                instrument_id=market_symbol,
+                order_id=ordId
             )
         except Exception as err:
-            # keep trying in case of error as we need to close our position
             log.error(
                 "[%s] Failed to get info for ordId %s. %s: %s",
                 vname,
@@ -428,8 +431,8 @@ async def liquidate_vault(
             await asyncio.sleep(retry_delay)
             continue
 
-        if response.get("code") != "0":
-            # failed to get order
+        # ✅ Handle bad API response properly
+        if response.get("code") != 0:
             log.error(
                 "[%s] Failed to get info for ordId %s. Response: %s",
                 vname,
@@ -443,11 +446,11 @@ async def liquidate_vault(
             state = response.get("state")
             total_fill_volume = float(response.get("filled_quantity", 0))
             avg_fill_price = float(response.get("avg_price", 0))
-            okx_fee = float(response.get("fee", 0))  # fee in quote currency
-            fee_ccy = proxy_symbol  # Crypto.com fees in quote currency
+            okx_fee = float(response.get("fee", 0))
+            fee_ccy = proxy_symbol
         except Exception:
             log.error(
-                "[%s] Failed to get order info. Unrecognized response format: %s",
+                "[%s] Failed to parse order info. Response: %s",
                 vname,
                 json.dumps(response),
             )
@@ -466,7 +469,8 @@ async def liquidate_vault(
                 okx_fee,
                 fee_ccy,
             )
-        if abs(total_fill_volume - hedge_volume) < 10 ** (-base_decimals):
+
+        if abs(total_fill_volume - hedge_volume) > 10 ** (-base_decimals):
             log.warning(
                 "[%s] Filled volume does not match hedge volume (%s != %s)",
                 vname,
@@ -474,33 +478,41 @@ async def liquidate_vault(
                 hedge_volume,
             )
 
-        quote_delta = (
-            total_fill_volume * avg_fill_price - okx_fee - bid_amount / MCAT
-        )  # LATER: add melt mojos (if any)
-        base_delta = (
-            collateral_to_receive - total_fill_volume
-        )  # LATER: deduct on-chain tx fee
-        price = crypto_com_order_book.mid_price()
-        if price is None:
-            log.error(
-                "[%s] Order book mid price unavailable. Cannot calculate PnL", vname
-            )
-            return BidFail.NOT_RECONCILED
+        break  # exit retry loop once successful
 
-        pnl = quote_delta + base_delta * price
+    # ❗ OUTSIDE the retry loop
 
-        log.info(
-            "[%s] PnL: %.2f USD. Change in %s position: %.3f. Chance in stablecoin position: %.3f",
+    quote_delta = (
+        total_fill_volume * avg_fill_price - okx_fee - bid_amount / MCAT
+    )
+    base_delta = collateral_to_receive - total_fill_volume
+
+    price = crypto_com_order_book.mid_price()
+    if price is None:
+        log.error(
+            "[%s] Order book mid price unavailable. Cannot calculate PnL",
             vname,
-            pnl,
-            collateral_symbol,
-            base_delta,
-            quote_delta,
         )
-        return BidFail.NONE
+        return BidFail.NOT_RECONCILED
 
+    pnl = quote_delta + base_delta * price
+
+    log.info(
+        "[%s] PnL: %.2f USD. Change in %s position: %.3f. Change in stablecoin position: %.3f",
+        vname,
+        pnl,
+        collateral_symbol,
+        base_delta,
+        quote_delta,
+    )
+
+    return BidFail.NONE
+
+    # if loop failed entirely
     log.warning(
-        "[%s] Failed to calculate PnL. All %s attempts unsuccessful", vname, max_retries
+        "[%s] Failed to calculate PnL. All %s attempts unsuccessful",
+        vname,
+        max_retries,
     )
     return BidFail.NOT_RECONCILED
 
@@ -649,7 +661,7 @@ async def run_liquidation_bid_bot():
                     collateral_symbol,
                     CONTINUE_DELAY,
                 )
-                asyncio.sleep(CONTINUE_DELAY)
+                await asyncio.sleep(CONTINUE_DELAY)
                 continue
 
             if available_byc_amount is None:
@@ -657,7 +669,7 @@ async def run_liquidation_bid_bot():
                     "Failed to get BYC wallet balance (None). Sleeping for %s seconds",
                     CONTINUE_DELAY,
                 )
-                asyncio.sleep(CONTINUE_DELAY)
+                await asyncio.sleep(CONTINUE_DELAY)
                 continue
 
             # Check how much debt there is. Then borrow an appropriate amount of BYC
